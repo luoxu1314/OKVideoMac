@@ -33726,3 +33726,77 @@ final class AndroidAVDRebuildRegressionTests: XCTestCase {
         }
     }
 }
+
+final class DanmakuTextRasterizationTests: XCTestCase {
+    func testChineseAndLatinForegroundSurvivesContrastDecoration() throws {
+        for text in ["中文弹幕测试，清晰显示每一个字", "彈幕測試，繁體中文", "Danmaku x2♡5"] {
+            for size: CGFloat in [18, 28, 42, 58] {
+                for scale: CGFloat in [1, 2] {
+                    let font = NSFont.systemFont(ofSize: size, weight: .semibold)
+                    let plain = try rasterize(text, attributes: [.font: font, .foregroundColor: NSColor.white], scale: scale)
+                    let decorated = try rasterize(text, attributes: DanmakuTextStyle.attributes(font: font, color: .white), scale: scale)
+                    var foregroundPixels = 0
+                    var damagedPixels = 0
+                    var shadowPixels = 0
+                    for y in 0..<plain.pixelsHigh {
+                        for x in 0..<plain.pixelsWide {
+                            let reference = try XCTUnwrap(plain.colorAt(x: x, y: y)?.usingColorSpace(.deviceRGB))
+                            let actual = try XCTUnwrap(decorated.colorAt(x: x, y: y)?.usingColorSpace(.deviceRGB))
+                            if reference.alphaComponent > 0.95 {
+                                foregroundPixels += 1
+                                if min(actual.redComponent, actual.greenComponent, actual.blueComponent, actual.alphaComponent) < 0.9 {
+                                    damagedPixels += 1
+                                }
+                            }
+                            if reference.alphaComponent < 0.01 && actual.alphaComponent > 0.05
+                                && max(actual.redComponent, actual.greenComponent, actual.blueComponent) < 0.1 {
+                                shadowPixels += 1
+                            }
+                        }
+                    }
+                    XCTAssertGreaterThan(foregroundPixels, 20, "Missing text: \(text)")
+                    XCTAssertLessThan(Double(damagedPixels) / Double(max(1, foregroundPixels)), 0.01,
+                                      "Damaged glyph fill: \(text), size=\(size), scale=\(scale)")
+                    XCTAssertGreaterThan(shadowPixels, 0, "Text needs contrast against bright video")
+                }
+            }
+        }
+    }
+
+    func testDecorationPreservesColoredCommentFill() throws {
+        let font = NSFont.systemFont(ofSize: 28, weight: .semibold)
+        let color = NSColor(calibratedRed: 0.2, green: 0.8, blue: 0.4, alpha: 1)
+        let plain = try rasterize("中文 Color", attributes: [.font: font, .foregroundColor: color], scale: 2)
+        let decorated = try rasterize("中文 Color", attributes: DanmakuTextStyle.attributes(font: font, color: color), scale: 2)
+        var compared = 0
+        for y in 0..<plain.pixelsHigh {
+            for x in 0..<plain.pixelsWide {
+                let reference = try XCTUnwrap(plain.colorAt(x: x, y: y)?.usingColorSpace(.deviceRGB))
+                guard reference.alphaComponent > 0.99 else { continue }
+                let actual = try XCTUnwrap(decorated.colorAt(x: x, y: y)?.usingColorSpace(.deviceRGB))
+                XCTAssertEqual(actual.redComponent, reference.redComponent, accuracy: 0.02)
+                XCTAssertEqual(actual.greenComponent, reference.greenComponent, accuracy: 0.02)
+                XCTAssertEqual(actual.blueComponent, reference.blueComponent, accuracy: 0.02)
+                compared += 1
+            }
+        }
+        XCTAssertGreaterThan(compared, 20)
+    }
+
+    private func rasterize(_ text: String, attributes: [NSAttributedString.Key: Any], scale: CGFloat) throws -> NSBitmapImageRep {
+        let size = (text as NSString).size(withAttributes: attributes)
+        let width = Int(ceil((ceil(size.width) + 8) * scale))
+        let height = Int(ceil((ceil(size.height) + 8) * scale))
+        let bitmap = try XCTUnwrap(NSBitmapImageRep(bitmapDataPlanes: nil, pixelsWide: width, pixelsHigh: height,
+            bitsPerSample: 8, samplesPerPixel: 4, hasAlpha: true, isPlanar: false,
+            colorSpaceName: .deviceRGB, bytesPerRow: width * 4, bitsPerPixel: 32))
+        let graphics = try XCTUnwrap(NSGraphicsContext(bitmapImageRep: bitmap))
+        NSGraphicsContext.saveGraphicsState()
+        defer { NSGraphicsContext.restoreGraphicsState() }
+        NSGraphicsContext.current = graphics
+        graphics.cgContext.clear(CGRect(x: 0, y: 0, width: width, height: height))
+        graphics.cgContext.scaleBy(x: scale, y: scale)
+        (text as NSString).draw(at: CGPoint(x: 4, y: 4), withAttributes: attributes)
+        return bitmap
+    }
+}

@@ -483,6 +483,18 @@ final class DanmakuDisplayDriver {
     deinit { stop() }
 }
 
+enum DanmakuTextStyle {
+    static func attributes(font: NSFont, color: NSColor) -> [NSAttributedString.Key: Any] {
+        // AppKit's attributed-string stroke can draw overlapping CJK contours
+        // through the fill. A shadow keeps contrast without stroking glyph paths.
+        let shadow = NSShadow()
+        shadow.shadowColor = NSColor.black.withAlphaComponent(0.9)
+        shadow.shadowOffset = .zero
+        shadow.shadowBlurRadius = 2
+        return [.font: font, .foregroundColor: color, .shadow: shadow]
+    }
+}
+
 final class DanmakuOverlayNSView: NSView {
     private struct ActiveComment {
         let lane: Int
@@ -633,8 +645,7 @@ final class DanmakuOverlayNSView: NSView {
         let font = NSFont.systemFont(ofSize: CGFloat(min(max(comment.fontSize * fontScale, 13), 58)), weight: .semibold)
         let color = NSColor(calibratedRed: CGFloat((comment.color >> 16) & 0xFF) / 255,
             green: CGFloat((comment.color >> 8) & 0xFF) / 255, blue: CGFloat(comment.color & 0xFF) / 255, alpha: 1)
-        let attributes: [NSAttributedString.Key: Any] = [.font: font, .foregroundColor: color,
-            .strokeColor: NSColor.black.withAlphaComponent(0.9), .strokeWidth: -2.5]
+        let attributes = DanmakuTextStyle.attributes(font: font, color: color)
         let size = (comment.text as NSString).size(withAttributes: attributes)
         let width = ceil(size.width) + 8, height = ceil(size.height) + 8
         let scale = window?.backingScaleFactor ?? 2
